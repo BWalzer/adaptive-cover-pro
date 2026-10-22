@@ -15,6 +15,7 @@ Concerns:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -304,6 +305,42 @@ async def test_panel_registered_once_admin_only(hass: HomeAssistant):
     assert kwargs["frontend_url_path"] == PANEL_URL_PATH
     assert kwargs["require_admin"] is True
     hass.http.async_register_static_paths.assert_awaited_once()
+
+
+async def test_concurrent_setups_register_panel_once(hass: HomeAssistant):
+    """Entries set up concurrently at boot must not both register the panel.
+
+    Regression: the flag was set only after the awaits, so a second entry's
+    setup passed the check mid-registration and HA raised "Overwriting panel",
+    failing that entry's setup.
+    """
+    hass.config.components.add("frontend")
+    hass.http = MagicMock(async_register_static_paths=AsyncMock())
+
+    async def slow_register(*args, **kwargs):
+        await asyncio.sleep(0)
+
+    with patch(
+        "homeassistant.components.panel_custom.async_register_panel",
+        side_effect=slow_register,
+    ) as register_panel:
+        await asyncio.gather(
+            async_setup_geometry_editor(hass), async_setup_geometry_editor(hass)
+        )
+
+    assert register_panel.call_count == 1
+
+
+async def test_panel_failure_does_not_fail_setup(hass: HomeAssistant, caplog):
+    hass.config.components.add("frontend")
+    hass.http = MagicMock(async_register_static_paths=AsyncMock())
+    with patch(
+        "homeassistant.components.panel_custom.async_register_panel",
+        side_effect=ValueError("Overwriting panel cover-geometry"),
+    ):
+        await async_setup_geometry_editor(hass)
+
+    assert "Could not register the Cover Geometry panel" in caplog.text
 
 
 async def test_no_panel_without_frontend(hass: HomeAssistant):

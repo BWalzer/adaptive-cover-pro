@@ -127,6 +127,20 @@ async def async_setup_geometry_editor(hass: HomeAssistant) -> None:
     if getattr(hass, "http", None) is None:
         return
 
+    # Claim the registration BEFORE the first await. Entries set up
+    # concurrently at boot; a flag set only after registering lets a second
+    # entry pass the check while the first is still awaiting, and its
+    # registration then raises "Overwriting panel".
+    state["panel"] = True
+    try:
+        await _async_register_panel(hass)
+    except Exception:  # noqa: BLE001
+        # The editor is optional: a frontend failure must never take the
+        # cover's own setup down with it.
+        _LOGGER.warning("Could not register the Cover Geometry panel", exc_info=True)
+
+
+async def _async_register_panel(hass: HomeAssistant) -> None:
     from homeassistant.components import panel_custom  # noqa: PLC0415
     from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
     from homeassistant.loader import async_get_integration  # noqa: PLC0415
@@ -147,7 +161,6 @@ async def async_setup_geometry_editor(hass: HomeAssistant) -> None:
         require_admin=True,
         config={},
     )
-    state["panel"] = True
 
 
 def _cover_type(entry) -> str | None:
