@@ -24,6 +24,8 @@ const C = {
   fov: "#f59e0b",
   elevation: "#0891b2",
   blind_spot: "#db2777",
+  desk: "#64748b",
+  person: "#c026d3",
 };
 
 // k: option key; kind: len | deg | bool | select.
@@ -186,6 +188,117 @@ const FIELDS = [
   },
 ];
 const FIELD = Object.fromEntries(FIELDS.map((f) => [f.k, f]));
+
+// A desk and a person, drawn to show where the sun lands on them. They are
+// not ACP options: ACP never sees them, and this browser keeps them per cover.
+const SCENE_FIELDS = [
+  {
+    k: "scene_show",
+    kind: "bool",
+    color: C.desk,
+    label: "Show desk and person",
+    help: "A drawing aid only. It isn't saved to Home Assistant and doesn't change what ACP does; this browser remembers it for each cover.",
+  },
+  {
+    k: "desk_x",
+    kind: "len",
+    color: C.desk,
+    label: "Desk starts",
+    min: 0,
+    max: 10,
+    help: "Glass to the near edge of the desk.",
+  },
+  {
+    k: "desk_depth",
+    kind: "len",
+    color: C.desk,
+    label: "Desk depth",
+    min: 0.1,
+    max: 3,
+    help: "Near edge to far edge.",
+  },
+  {
+    k: "desk_h",
+    kind: "len",
+    color: C.desk,
+    label: "Desk height",
+    min: 0.2,
+    max: 1.5,
+    help: "Floor to the desk top.",
+  },
+  {
+    k: "eye_x",
+    kind: "len",
+    color: C.person,
+    label: "Your eyes, from the glass",
+    min: 0.1,
+    max: 10,
+    help: "How far from the glass you sit or stand, assumed level with the middle of the window.",
+  },
+  {
+    k: "eye_h",
+    kind: "len",
+    color: C.person,
+    label: "Eye height",
+    min: 0.5,
+    max: 2.2,
+    presets: [
+      ["Seated", 1.2],
+      ["Standing", 1.6],
+    ],
+    help: "Floor to eye level.",
+  },
+];
+const SCENE_FIELD = Object.fromEntries(SCENE_FIELDS.map((f) => [f.k, f]));
+const SCENE_DEFAULT = {
+  scene_show: true,
+  desk_x: 0.1,
+  desk_depth: 0.75,
+  desk_h: 0.74,
+  eye_x: 1.1,
+  eye_h: 1.2,
+};
+const sceneKey = (entryId) => `${DOMAIN}:geometry-editor:scene:${entryId}`;
+
+// Where the sun falls on the desk and the eyes, in the section plane through
+// the window (the desk and the person are assumed level with the window, so
+// window width doesn't come into it). A ray reaching (x, y) in the room came
+// through the glass at height y + x·slope, where slope is tan(el)/cos(gamma),
+// the same profile angle the vertical engine uses. It is lit when that height
+// is on open glass: above the sill and below the blind's bottom edge.
+function sceneSun(c, s, el, gamma, blindBottom) {
+  if (!(el > 0) || Math.cos(gamma * RAD) <= 0) return { up: false };
+  const slope = Math.tan(el * RAD) / clampedCos(gamma);
+  const h = c.window_height,
+    sill = c.sill_height,
+    top = sill + h;
+  const glassAt = (x, y) => y + x * slope;
+  const open = blindBottom - sill > 0.001;
+  // Most open position that keeps rays entering at or above `g` off the
+  // target: the blind's bottom edge must come down to `g`.
+  const maxPct = (gLow, gHigh) =>
+    gLow >= top || gHigh < sill
+      ? 100
+      : Math.max(0, Math.floor(((Math.max(gLow, sill) - sill) / h) * 100));
+
+  const d0 = s.desk_x,
+    d1 = s.desk_x + s.desk_depth;
+  let deskLit = null;
+  if (open) {
+    const a = Math.max(d0, (sill - s.desk_h) / slope);
+    const b = Math.min(d1, (blindBottom - s.desk_h) / slope);
+    if (b > a) deskLit = [a, b];
+  }
+  const eyeGlass = glassAt(s.eye_x, s.eye_h);
+  return {
+    up: true,
+    slope,
+    deskLit,
+    deskMax: maxPct(glassAt(d0, s.desk_h), glassAt(d1, s.desk_h)),
+    eyeLit: open && eyeGlass >= sill && eyeGlass <= blindBottom,
+    eyeMax: maxPct(eyeGlass, eyeGlass),
+  };
+}
 
 // ---------------------------------------------------------------- sun and model
 
@@ -456,6 +569,7 @@ class AcpDesigner extends HTMLElement {
       this._bsStored =
         o.blind_spot_left_gamma != null && o.blind_spot_right_gamma != null;
       this._cfg = { ...this._orig };
+      this._scene = this._loadScene(id);
       const live = r.live;
       this._meta = {
         name: r.title,
@@ -483,6 +597,29 @@ class AcpDesigner extends HTMLElement {
       this._clearEntry();
       this._setStatus(`Could not load: ${e.message || e}`, true);
       return false;
+    }
+  }
+
+  // The desk and person live in this browser only. Storage can be missing or
+  // throw (private windows, blocked site data); the defaults then apply.
+  _loadScene(entryId) {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(sceneKey(entryId)) || "{}");
+    } catch (e) {
+      saved = {};
+    }
+    return { ...SCENE_DEFAULT, ...saved };
+  }
+
+  _saveScene() {
+    try {
+      localStorage.setItem(
+        sceneKey(this._entryId),
+        JSON.stringify(this._scene),
+      );
+    } catch (e) {
+      // Not remembered this time; the drawing still works.
     }
   }
 
@@ -637,7 +774,7 @@ class AcpDesigner extends HTMLElement {
         const input =
           k &&
           this.shadowRoot.querySelector(
-            `[data-field="${k === "fov" ? "fov_left" : k}"] input`,
+            `[data-field="${{ fov: "fov_left", desk: "desk_x", person: "eye_x" }[k] || k}"] input`,
           );
         if (input) {
           input.focus();
@@ -697,8 +834,27 @@ class AcpDesigner extends HTMLElement {
         </div>`;
     }
     html += "</fieldset>";
+    html += this._sceneFieldset();
     form.innerHTML = html;
-    for (const el of form.querySelectorAll(".field")) {
+    for (const el of form.querySelectorAll(".field.scene")) {
+      const f = SCENE_FIELD[el.dataset.field];
+      el.addEventListener("mouseenter", () => this._highlight(f.k));
+      el.addEventListener("mouseleave", () => this._highlight(null));
+      el.addEventListener("focusin", () => this._highlight(f.k));
+      el.addEventListener("input", (e) =>
+        this._onSceneInput(f, e.target, el, false),
+      );
+      el.addEventListener("change", (e) =>
+        this._onSceneInput(f, e.target, el, true),
+      );
+      for (const b of el.querySelectorAll("button[data-preset]"))
+        b.addEventListener("click", () => {
+          const input = el.querySelector("input[type=number]");
+          input.value = +this._toUnit(+b.dataset.preset).toFixed(2);
+          this._onSceneInput(f, input, el, true);
+        });
+    }
+    for (const el of form.querySelectorAll(".field:not(.scene)")) {
       const f = FIELD[el.dataset.field];
       el.addEventListener("mouseenter", () => this._highlight(f.k));
       el.addEventListener("mouseleave", () => this._highlight(null));
@@ -711,6 +867,45 @@ class AcpDesigner extends HTMLElement {
       );
     }
     this._markDirty();
+  }
+
+  _sceneFieldset() {
+    const s = this._scene;
+    let html = `<fieldset class="scenebox"><legend>Desk &amp; person · not saved to HA</legend>`;
+    for (const f of SCENE_FIELDS) {
+      const v = s[f.k];
+      let input;
+      if (f.kind === "bool")
+        input = `<input type="checkbox" ${v ? "checked" : ""}>`;
+      else {
+        input = `<input type="number" step="${this._imperial ? 0.5 : 1}" value="${+this._toUnit(v).toFixed(2)}"><span class="unit">${this._lenUnit}</span>`;
+        for (const [name, m] of f.presets || [])
+          input += `<button type="button" class="ghost preset" data-preset="${m}">${name}</button>`;
+      }
+      html += `<div class="field scene ${f.kind}" data-field="${f.k}" style="--c:${f.color}">
+          <label><i></i>${f.label}</label>
+          <div class="ctl">${input}</div>
+          ${f.help ? `<p>${f.help}</p>` : ""}
+        </div>`;
+    }
+    return html + "</fieldset>";
+  }
+
+  _onSceneInput(f, target, el, committed) {
+    if (!this._scene) return;
+    let v;
+    if (f.kind === "bool") v = target.checked;
+    else {
+      if (target.value === "") return;
+      v = +target.value;
+      if (Number.isNaN(v)) return;
+      v = Math.min(Math.max(this._fromUnit(v), f.min), f.max);
+      if (committed) target.value = +this._toUnit(v).toFixed(2);
+    }
+    this._scene[f.k] = v;
+    this._saveScene();
+    this._markDirty();
+    this._renderAll();
   }
 
   // `committed` is the change event (Enter or leaving the box). Only then is the
@@ -744,7 +939,11 @@ class AcpDesigner extends HTMLElement {
       el.classList.toggle("is-dirty", dirty.has(el.dataset.field));
       el.classList.toggle(
         "off",
-        el.dataset.field.startsWith("blind_spot_") && !this._cfg?.blind_spot,
+        (el.dataset.field.startsWith("blind_spot_") &&
+          !this._cfg?.blind_spot) ||
+          (el.classList.contains("scene") &&
+            el.dataset.field !== "scene_show" &&
+            !this._scene?.scene_show),
       );
     }
     const save = this.shadowRoot.getElementById("save");
@@ -763,6 +962,8 @@ class AcpDesigner extends HTMLElement {
           k.startsWith("fov") ? "fov" : null,
           k.startsWith("blind_spot") ? "blind_spot" : null,
           /elevation$/.test(k) && !k.startsWith("blind") ? "elevation" : null,
+          k.startsWith("desk_") ? "desk" : null,
+          k.startsWith("eye_") ? "person" : null,
         ]
       : [];
     for (const el of this.shadowRoot.querySelectorAll("[data-k]"))
@@ -773,7 +974,10 @@ class AcpDesigner extends HTMLElement {
         keys.includes(el.dataset.field) ||
           (k === "fov" && el.dataset.field.startsWith("fov")) ||
           (k === "blind_spot" && el.dataset.field.startsWith("blind_spot")) ||
-          (k === "elevation" && /^(min|max)_elevation$/.test(el.dataset.field)),
+          (k === "elevation" &&
+            /^(min|max)_elevation$/.test(el.dataset.field)) ||
+          (k === "desk" && el.dataset.field.startsWith("desk_")) ||
+          (k === "person" && el.dataset.field.startsWith("eye_")),
       );
     this.shadowRoot.querySelector(".views").classList.toggle("focusing", !!k);
   }
@@ -823,6 +1027,31 @@ class AcpDesigner extends HTMLElement {
           };
     $("trytext").textContent = tried == null ? "" : `${tried}% open`;
 
+    // Desk and eyes, against the blind as drawn (ACP's or the tried one).
+    const blindBottom =
+      this._cfg.sill_height +
+      (p.drop ?? (p.pct / 100) * this._cfg.window_height);
+    const sc = this._scene?.scene_show
+      ? sceneSun(this._cfg, this._scene, sun.el, p.gamma, blindBottom)
+      : null;
+    this._sceneNow = sc;
+    const keepsAt = (pct) =>
+      pct >= 100
+        ? "at any position"
+        : `with the blind at or below <b>${pct}%</b>`;
+    const sceneLines = !sc
+      ? ""
+      : !sc.up
+        ? `<div class="muted">Desk and eyes: no direct sun on the window right now.</div>`
+        : `<div class="${sc.deskLit ? "lit" : ""}"><span class="k">Desk:</span> ${
+            sc.deskLit
+              ? `sun on ${this._fmtLen(sc.deskLit[1] - sc.deskLit[0])} of it`
+              : "in shade"
+          }. Stays in shade ${keepsAt(sc.deskMax)}.</div>
+          <div class="${sc.eyeLit ? "lit" : ""}"><span class="k">Your eyes:</span> ${
+            sc.eyeLit ? "sun in your eyes" : "clear"
+          }. Clear ${keepsAt(sc.eyeMax)}.</div>`;
+
     const pad = (n) => String(n).padStart(2, "0");
     const { y, mo, d } = this._day;
     $("date").value = `${y}-${pad(mo + 1)}-${pad(d)}`;
@@ -841,6 +1070,7 @@ class AcpDesigner extends HTMLElement {
       <div class="${acp.ok ? "on" : "off"}"><span class="k">${esc(acp.why)}</span>
         → ACP ${acp.ok ? `sets the blind to <b>${acp.pct}%</b> (${this._fmtLen(acp.drop)} of glass open from the bottom)` : `sends the blind to its default, <b>${acp.pct}%</b>`}</div>
       ${tried == null ? "" : `<div class="trying">Drawing the blind at <b>${tried}%</b> instead. This is a preview; the real blind doesn't move.</div>`}
+      ${sceneLines}
       ${live ? `<div class="muted">HA right now: sun ${f1(live.el)}° / ${Math.round(live.az)}°, calculated ${live.pct}%</div>` : ""}`;
 
     $("frontsub").textContent =
@@ -1017,7 +1247,53 @@ class AcpDesigner extends HTMLElement {
       <text class="side-label" x="${fx1}" y="${H - 6}" text-anchor="end">your right →</text>
       <text class="side-label" x="${cx}" y="${H - 6}" text-anchor="middle">horizon</text>`;
 
-    return `${out}<g clip-path="url(#fclip)">${shade}${grid}${edges}${path}${ticks}${sunDot}${blind}</g>${frame}${compass}${labels}`;
+    const seat = this._frontSeat(p, X, Y, elMax);
+    return `${out}<g clip-path="url(#fclip)">${shade}${grid}${edges}${path}${ticks}${blind}${seat}${sunDot}</g>${frame}${compass}${labels}`;
+  }
+
+  // The window as seen from the person's eyes, in the front view's own frame
+  // (across = gamma, up = elevation). From the eye, a sun direction passes
+  // through the glass when its ray crosses the window plane between the sill
+  // and the top: glass height = eye height + eye distance·tan(el)/cos(gamma),
+  // with the lateral offset eye distance·tan(gamma) within half the width.
+  // The sun's path crossing this shape below the blind means sun in the eyes.
+  _frontSeat(p, X, Y, elMax) {
+    const s = this._scene;
+    if (!s?.scene_show) return "";
+    const c = this._cfg;
+    const w = c.window_width ?? 0.9;
+    const sill = c.sill_height,
+      top = sill + c.window_height;
+    const blindBottom = sill + (p.drop ?? (p.pct / 100) * c.window_height);
+    const gMax = Math.atan(w / 2 / s.eye_x) / RAD;
+    // Elevation from the eye to glass height g, along direction gamma.
+    const elAt = (g, gamma) =>
+      Math.atan(((g - s.eye_h) * Math.cos(gamma * RAD)) / s.eye_x) / RAD;
+    const curve = (g, from, to) => {
+      const pts = [];
+      const n = 24;
+      for (let i = 0; i <= n; i++) {
+        const gamma = from + ((to - from) * i) / n;
+        const el = Math.max(Math.min(elAt(g, gamma), elMax + 5), -1);
+        pts.push(`${X(gamma).toFixed(1)},${Y(el).toFixed(1)}`);
+      }
+      return pts;
+    };
+    if (elAt(top, 0) <= 0)
+      // All the glass is below eye level: no direct sun can reach the eyes.
+      return `<text class="seatlabel" x="${X(0)}" y="${Y(2)}" text-anchor="middle">the window is below your eye level</text>`;
+    const shape = [...curve(top, -gMax, gMax), ...curve(sill, gMax, -gMax)];
+    let out = `<polygon class="seatwin" data-k="person" points="${shape.join(" ")}" />`;
+    if (blindBottom < top - 0.001) {
+      const covered = [
+        ...curve(top, -gMax, gMax),
+        ...curve(Math.max(blindBottom, sill), gMax, -gMax),
+      ];
+      out += `<polygon class="seatblind" points="${covered.join(" ")}" />`;
+    }
+    const labelEl = Math.min(elAt(top, 0) + 2, elMax - 2);
+    out += `<text class="seatlabel" x="${X(0)}" y="${Y(labelEl)}" text-anchor="middle">the window from your eyes${c.window_width == null ? " (width assumed)" : ""}</text>`;
+    return out;
   }
 
   // Section through the window: x into the room from the glass, y up from the floor.
@@ -1041,6 +1317,12 @@ class AcpDesigner extends HTMLElement {
       ceil * 1.1,
       2.2,
       sunUp ? Math.min(land(top) + 0.4, 9) : 0,
+      this._scene?.scene_show
+        ? Math.max(
+            this._scene.desk_x + this._scene.desk_depth,
+            this._scene.eye_x,
+          ) + 0.5
+        : 0,
     );
     const W = 640,
       padL = 20,
@@ -1161,8 +1443,44 @@ class AcpDesigner extends HTMLElement {
       <line class="ceil" x1="${X(0)}" y1="${Y(ceil)}" x2="${X(xMax)}" y2="${Y(ceil)}" />
       ${zones}
       <g clip-path="url(#clip)">${rays}</g>
+      ${this._sideScene(X, Y)}
       ${wall}
       ${dims}`;
+  }
+
+  // Desk (lit stretch of its top in amber) and a person facing the window.
+  _sideScene(X, Y) {
+    const s = this._scene,
+      sc = this._sceneNow;
+    if (!s?.scene_show) return "";
+    const d0 = s.desk_x,
+      d1 = s.desk_x + s.desk_depth,
+      dh = s.desk_h;
+    let out = `<g class="desk" data-k="desk">
+        <rect class="desktop" x="${X(d0)}" y="${Y(dh)}" width="${X(d1) - X(d0)}" height="5" />
+        <line class="deskleg" x1="${X(d0) + 3}" y1="${Y(dh)}" x2="${X(d0) + 3}" y2="${Y(0)}" />
+        <line class="deskleg" x1="${X(d1) - 3}" y1="${Y(dh)}" x2="${X(d1) - 3}" y2="${Y(0)}" />
+        ${sc?.deskLit ? `<rect class="desklit" x="${X(sc.deskLit[0])}" y="${Y(dh) - 3}" width="${Math.max(X(sc.deskLit[1]) - X(sc.deskLit[0]), 2)}" height="6" />` : ""}
+      </g>`;
+    // Head centred just behind and above the eye; seated below ~1.4 m.
+    const ex = s.eye_x,
+      eh = s.eye_h,
+      head = 0.11;
+    const seated = eh < 1.4;
+    const hip = seated ? 0.48 : 0.95;
+    const hx = ex + 0.06;
+    out += `<g class="person" data-k="person">
+        <circle class="pbody" cx="${X(hx)}" cy="${Y(eh + 0.03)}" r="${head * (X(1) - X(0))}" />
+        <line class="pbody" x1="${X(hx)}" y1="${Y(eh - head)}" x2="${X(hx + 0.05)}" y2="${Y(hip)}" />
+        ${
+          seated
+            ? `<line class="pbody" x1="${X(hx + 0.05)}" y1="${Y(hip)}" x2="${X(hx - 0.4)}" y2="${Y(hip)}" />
+               <line class="pbody" x1="${X(hx - 0.4)}" y1="${Y(hip)}" x2="${X(hx - 0.42)}" y2="${Y(0)}" />`
+            : `<line class="pbody" x1="${X(hx + 0.05)}" y1="${Y(hip)}" x2="${X(hx)}" y2="${Y(0)}" />`
+        }
+        <circle class="eye ${sc?.eyeLit ? "lit" : ""}" cx="${X(ex)}" cy="${Y(eh)}" r="4" />
+      </g>`;
+    return out;
   }
 
   // Polar sun chart: bearing around, elevation inward (rim = horizon).
@@ -1290,10 +1608,30 @@ class AcpDesigner extends HTMLElement {
     let pts = [],
       sunBands = "",
       bandStart = null;
+    // Most open position that keeps the desk shaded, wherever the sun can
+    // reach the window at all; compare it with ACP's line.
+    const showDesk = !!this._scene?.scene_show;
+    const deskSegs = [];
+    let deskSeg = [];
     for (let m = 0; m <= 1440; m += 5) {
       const sp = sunPosition(this._at(m), lat, lon);
       const p = predict(c, sp.az, sp.el);
       pts.push(`${X(m).toFixed(1)},${Y(p.pct).toFixed(1)}`);
+      if (showDesk) {
+        const sc = sceneSun(
+          c,
+          this._scene,
+          sp.el,
+          gammaOf(c.set_azimuth, sp.az),
+          c.sill_height,
+        );
+        if (sc.up)
+          deskSeg.push(`${X(m).toFixed(1)},${Y(sc.deskMax).toFixed(1)}`);
+        else if (deskSeg.length) {
+          deskSegs.push(deskSeg);
+          deskSeg = [];
+        }
+      }
       if (p.ok && bandStart === null) bandStart = m;
       if ((!p.ok || m === 1440) && bandStart !== null) {
         sunBands += `<rect class="band" x="${X(bandStart)}" y="${t}" width="${X(m) - X(bandStart)}" height="${H - t - b}" />`;
@@ -1305,7 +1643,18 @@ class AcpDesigner extends HTMLElement {
       axis += `<text class="axis" x="${X(hr * 60)}" y="${H - 6}" text-anchor="middle">${hr}h</text>`;
     for (const pct of [0, 50, 100])
       axis += `<text class="axis" x="${l - 4}" y="${Y(pct)}" text-anchor="end" dominant-baseline="middle">${pct}%</text><line class="grid" x1="${l}" x2="${W - r}" y1="${Y(pct)}" y2="${Y(pct)}" />`;
-    return `${sunBands}${axis}<polyline class="pos" points="${pts.join(" ")}" />
+    if (deskSeg.length) deskSegs.push(deskSeg);
+    const desk = deskSegs
+      .filter((sg) => sg.length > 1)
+      .map(
+        (sg) =>
+          `<polyline class="deskmax" data-k="desk" points="${sg.join(" ")}" />`,
+      )
+      .join("");
+    const legend = showDesk
+      ? `<line class="deskmax" x1="${W - r - 200}" x2="${W - r - 180}" y1="${t + 8}" y2="${t + 8}" /><text class="axis" x="${W - r - 175}" y="${t + 8}" dominant-baseline="middle">desk stays shaded at or below</text>`
+      : "";
+    return `${sunBands}${axis}${desk}${legend}<polyline class="pos" points="${pts.join(" ")}" />
       <line class="now" x1="${X(this._minute)}" x2="${X(this._minute)}" y1="${t}" y2="${H - b}" />`;
   }
 }
@@ -1360,6 +1709,17 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: u
 .trylabel { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .trying { color: var(--accent); }
 .note.strong.warn { fill: #d93025; }
+.desktop { fill: #64748b; } .deskleg { stroke: #64748b; stroke-width: 2.5; }
+.desklit { fill: var(--sun); }
+.pbody { fill: none; stroke: #c026d3; stroke-width: 3; stroke-linecap: round; }
+.eye { fill: #c026d3; } .eye.lit { fill: #d93025; stroke: var(--sun); stroke-width: 3; }
+.readout .lit .k { color: #d93025; }
+.scenebox { border-style: dashed; }
+.preset { padding: 3px 8px; font-size: 12px; }
+.seatwin { fill: color-mix(in srgb, #c026d3 10%, transparent); stroke: #c026d3; stroke-width: 2; stroke-dasharray: 6 4; }
+.seatblind { fill: color-mix(in srgb, #4b5563 35%, transparent); }
+.seatlabel { fill: #c026d3; font-weight: 600; }
+.deskmax { fill: none; stroke: #64748b; stroke-width: 2; stroke-dasharray: 5 4; }
 @media (max-width: 900px) {
   :host { display: block; height: auto; overflow: visible; }
   .main { grid-template-columns: 1fr; }
