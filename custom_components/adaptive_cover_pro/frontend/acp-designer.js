@@ -566,6 +566,14 @@ class AcpDesigner extends HTMLElement {
               <span id="clock" class="mono"></span>
               <button id="now" class="ghost">Now</button>
             </div>
+            <div class="row try">
+              <label class="trylabel"><input type="checkbox" id="trytoggle"> Try a blind position</label>
+              <input type="range" id="trypct" min="0" max="100" step="1" value="50" disabled>
+              <span id="trytext" class="mono"></span>
+            </div>
+          </section>
+          <section class="card daycard">
+            <header><h2>Through the day</h2><span class="sub">ACP's predicted position; shaded while the sun is on the window</span></header>
             <svg id="day" viewBox="0 0 640 120"></svg>
           </section>
           <section class="card">
@@ -609,6 +617,17 @@ class AcpDesigner extends HTMLElement {
     });
     $("now").addEventListener("click", () => {
       this._setNow();
+      this._renderAll();
+    });
+    // A preview only: draws the blind at a chosen position so you can see
+    // where the sun would land. It never moves the real cover.
+    $("trytoggle").addEventListener("change", (e) => {
+      $("trypct").disabled = !e.target.checked;
+      this._tryPct = e.target.checked ? +$("trypct").value : null;
+      this._renderAll();
+    });
+    $("trypct").addEventListener("input", (e) => {
+      this._tryPct = +e.target.value;
       this._renderAll();
     });
     // Clicking a labelled part of a drawing jumps to its field.
@@ -789,7 +808,20 @@ class AcpDesigner extends HTMLElement {
     const { latitude: lat, longitude: lon } = this._meta.loc;
     const when = this._when();
     const sun = sunPosition(when, lat, lon);
-    const p = predict(this._cfg, sun.az, sun.el);
+    const acp = predict(this._cfg, sun.az, sun.el);
+    // "Try a blind position" swaps in the chosen position for drawing; the
+    // readout still reports what ACP itself would do.
+    const tried = this._tryPct ?? null;
+    const p =
+      tried == null
+        ? acp
+        : {
+            ...acp,
+            pct: tried,
+            drop: (tried / 100) * this._cfg.window_height,
+            tried: true,
+          };
+    $("trytext").textContent = tried == null ? "" : `${tried}% open`;
 
     const pad = (n) => String(n).padStart(2, "0");
     const { y, mo, d } = this._day;
@@ -806,8 +838,9 @@ class AcpDesigner extends HTMLElement {
     $("readout").innerHTML = `
       <div><span class="k">Sun</span> ${f1(sun.el)}° up, bearing ${Math.round(sun.az)}°,
         ${Math.abs(p.gamma) < 0.5 ? "straight out" : `${Math.round(Math.abs(p.gamma))}° ${p.gamma > 0 ? "left" : "right"} of straight out`}</div>
-      <div class="${p.ok ? "on" : "off"}"><span class="k">${esc(p.why)}</span>
-        → blind ${p.ok ? `at <b>${p.pct}%</b> (${this._fmtLen(p.drop)} of glass open from the bottom)` : `goes to its default, <b>${p.pct}%</b>`}</div>
+      <div class="${acp.ok ? "on" : "off"}"><span class="k">${esc(acp.why)}</span>
+        → ACP ${acp.ok ? `sets the blind to <b>${acp.pct}%</b> (${this._fmtLen(acp.drop)} of glass open from the bottom)` : `sends the blind to its default, <b>${acp.pct}%</b>`}</div>
+      ${tried == null ? "" : `<div class="trying">Drawing the blind at <b>${tried}%</b> instead. This is a preview; the real blind doesn't move.</div>`}
       ${live ? `<div class="muted">HA right now: sun ${f1(live.el)}° / ${Math.round(live.az)}°, calculated ${live.pct}%</div>` : ""}`;
 
     $("frontsub").textContent =
@@ -1046,11 +1079,18 @@ class AcpDesigner extends HTMLElement {
       if (blindBottom > sill + 0.001)
         rays += `<rect class="litfloor" x="${X(near)}" y="${fl - 3}" width="${Math.max(X(land(blindBottom)) - X(near), 2)}" height="6" />`;
       const shut = blindBottom <= sill + 0.001;
+      // How far the sun that gets past the blind reaches, against the
+      // "sun may reach" line: this is the one thing the setting promises.
+      const reach = land(blindBottom);
+      const past = !shut && reach > D + 0.01;
+      const label = shut
+        ? "sun would land here if the blind opened"
+        : past
+          ? `sun reaches ${this._fmtLen(reach)} in, past the "sun may reach" line`
+          : 'sun lands here, inside the "sun may reach" line';
       const mid = (X(near) + X(Math.min(far, xMax))) / 2,
-        edge = mid > X(xMax) - 150;
-      rays += `<text class="note strong" x="${edge ? X(xMax) - 4 : mid}" y="${fl - 10}" text-anchor="${edge ? "end" : "middle"}">${
-        shut ? "sun would land here if the blind opened" : "sun lands here"
-      }${far > xMax ? " →" : ""}</text>`;
+        edge = mid > X(xMax) - 170;
+      rays += `<text class="note strong ${past ? "warn" : ""}" x="${edge ? X(xMax) - 4 : mid}" y="${fl - 10}" text-anchor="${edge ? "end" : "middle"}">${esc(label)}${far > xMax ? " →" : ""}</text>`;
     } else {
       rays += `<text class="note" x="${X(0.08) + 6}" y="${padT + 12}">${esc(p.why)}</text>`;
     }
@@ -1271,7 +1311,11 @@ class AcpDesigner extends HTMLElement {
 }
 
 const STYLE = `
-:host { display: block; min-height: 100vh; box-sizing: border-box; padding: 16px;
+/* Fits the viewport: the settings and the drawings scroll independently, so
+   the settings stay beside whatever drawing is in view. Narrow screens fall
+   back to one column that scrolls as a page (see the max-width query). */
+:host { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden;
+  box-sizing: border-box; padding: 16px;
   --fg: var(--primary-text-color, #1f2328); --muted: var(--secondary-text-color, #6b7280);
   --bg: var(--primary-background-color, #f4f5f7); --card: var(--card-background-color, #fff);
   --line: var(--divider-color, #e3e5e8); --accent: var(--primary-color, #03a9f4);
@@ -1281,7 +1325,8 @@ const STYLE = `
 * { box-sizing: border-box; }
 h1 { font-size: 20px; margin: 0; font-weight: 500; }
 h2 { font-size: 15px; margin: 0; font-weight: 500; }
-.top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.top { flex: none; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  width: 100%; max-width: 1700px; margin: 0 auto 14px; }
 .grow { flex: 1; }
 #status { color: var(--muted); } #status.err { color: #d93025; }
 select, input[type=number], input[type=date] { font: inherit; color: var(--fg); background: var(--card);
@@ -1289,9 +1334,9 @@ select, input[type=number], input[type=date] { font: inherit; color: var(--fg); 
 button { font: inherit; border: 0; border-radius: 6px; padding: 7px 14px; background: var(--accent); color: #fff; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
 button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
-.main { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; align-items: start; }
-@media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
-form { display: flex; flex-direction: column; gap: 12px; }
+.main { flex: 1; min-height: 0; width: 100%; max-width: 1700px; margin: 0 auto;
+  display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 16px; }
+form { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding-right: 4px; }
 fieldset { border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin: 0; padding: 6px 12px 10px; }
 legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .field { padding: 7px 8px; margin: 0 -8px; border-radius: 8px; transition: background .15s; }
@@ -1307,11 +1352,26 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: u
 .field p { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; }
 .field.bool { display: grid; grid-template-columns: 1fr auto; } .field.bool .ctl { margin: 0; grid-row: 1; grid-column: 2; }
 .field.bool p { grid-column: 1 / 3; }
-.views { display: flex; flex-direction: column; gap: 16px; }
+.views { min-height: 0; overflow-y: auto; display: grid; gap: 16px; align-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
+.views > .time, .views > .daycard { grid-column: 1 / -1; }
+/* The time and preview controls stay put while the drawings scroll. */
+.time { position: sticky; top: 0; z-index: 3; box-shadow: 0 6px 12px -10px rgba(0,0,0,.35); }
+.trylabel { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.trying { color: var(--accent); }
+.note.strong.warn { fill: #d93025; }
+@media (max-width: 900px) {
+  :host { display: block; height: auto; overflow: visible; }
+  .main { grid-template-columns: 1fr; }
+  form, .views { overflow: visible; }
+  .views { grid-template-columns: minmax(0, 1fr); }
+  .time { position: static; }
+}
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
 .card header { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
 .sub { color: var(--muted); font-size: 12.5px; }
-svg { width: 100%; height: auto; display: block; font-size: 12px; }
+svg { width: 100%; height: auto; max-height: 60vh; display: block; font-size: 12px; }
+#day { max-height: 180px; }
 #plan { max-width: 480px; margin: 0 auto; }
 .time .row { display: flex; gap: 10px; align-items: center; margin: 8px 0 4px; }
 .time .row input[type=range] { flex: 1; }
