@@ -23,6 +23,7 @@ position preview model the vertical engine only.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -140,12 +141,22 @@ async def async_setup_geometry_editor(hass: HomeAssistant) -> None:
         _LOGGER.warning("Could not register the Cover Geometry panel", exc_info=True)
 
 
+def _frontend_digest() -> str:
+    """Return a short hash of the panel script, for its cache-busting URL.
+
+    The integration version is not enough: it only changes on release, and an
+    install whose files carry an old mtime (a Nix store, a restored backup)
+    lets browsers heuristically cache the script for years.
+    """
+    script = FRONTEND_DIR / f"{PANEL_COMPONENT}.js"
+    return hashlib.sha256(script.read_bytes()).hexdigest()[:12]
+
+
 async def _async_register_panel(hass: HomeAssistant) -> None:
     from homeassistant.components import panel_custom  # noqa: PLC0415
     from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
-    from homeassistant.loader import async_get_integration  # noqa: PLC0415
 
-    version = (await async_get_integration(hass, DOMAIN)).version
+    digest = await hass.async_add_executor_job(_frontend_digest)
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
     )
@@ -155,9 +166,8 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         webcomponent_name=PANEL_COMPONENT,
         sidebar_title="Cover Geometry",
         sidebar_icon="mdi:sun-angle-outline",
-        # The version busts browser caches on upgrade; cache_headers=False
-        # above covers edits within one version.
-        module_url=f"{STATIC_URL}/{PANEL_COMPONENT}.js?v={version}",
+        # Changes whenever the script does, so browsers never keep a stale copy.
+        module_url=f"{STATIC_URL}/{PANEL_COMPONENT}.js?v={digest}",
         require_admin=True,
         config={},
     )

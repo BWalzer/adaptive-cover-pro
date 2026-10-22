@@ -16,6 +16,7 @@ Concerns:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -304,6 +305,13 @@ async def test_panel_registered_once_admin_only(hass: HomeAssistant):
     kwargs = register_panel.await_args.kwargs
     assert kwargs["frontend_url_path"] == PANEL_URL_PATH
     assert kwargs["require_admin"] is True
+    # Cache-busted by the script's content, not the integration version.
+    script = (
+        Path(__file__).parent.parent
+        / "custom_components/adaptive_cover_pro/frontend/acp-designer.js"
+    )
+    digest = hashlib.sha256(script.read_bytes()).hexdigest()[:12]
+    assert kwargs["module_url"].endswith(f"acp-designer.js?v={digest}")
     hass.http.async_register_static_paths.assert_awaited_once()
 
 
