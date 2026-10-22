@@ -1,6 +1,7 @@
 {
   "domain": "adaptive_cover_pro",
   "name": "Adaptive Cover Pro",
+  "after_dependencies": ["frontend", "http"],
   "codeowners": ["@jrhubott"],
   "config_flow": true,
   "dependencies": [

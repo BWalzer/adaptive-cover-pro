@@ -43,6 +43,10 @@ The **[Adaptive Cover Pro Card](https://github.com/jrhubott/adaptive-cover-pro-c
 
 Setup and options: **[Lovelace Card](https://github.com/jrhubott/adaptive-cover-pro/wiki/Lovelace-Card)** · **[Sky Compass Card](https://github.com/jrhubott/adaptive-cover-pro/wiki/Sky-Compass-Card)**.
 
+## Visual geometry editor
+
+For vertical blinds, **Cover Geometry** in the sidebar (admins only, also linked from the cover's options menu) edits window height, sill, reveal depth, the "sun may reach" distance, orientation, sun-height limits and the blind spot on a drawing instead of as bare numbers. It shows the window from the front with the day's sun path through it, a section with the sun's rays and where they land, a top-down sun chart, and the predicted position across the day. Saving applies all changes in one validated options update.
+
 ---
 
 ## Quick install

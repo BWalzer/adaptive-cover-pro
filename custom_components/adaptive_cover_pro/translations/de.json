@@ -340,6 +340,7 @@
           "cover_entities": "🪟 Beschattungen & Gerät",
           "geometry": "📐 Beschattungsgeometrie",
           "sun_tracking": "☀️ Sonnenverfolgung",
+          "geometry_editor": "🖼️ Visueller Geometrie-Editor",
           "position": "📊 Positionseinstellungen",
           "behavior": "🎛️ Verhalten & Timing",
           "blind_spot": "🌳 Blindfleck",
@@ -790,6 +791,10 @@
           "troubleshoot": "🔁 Erneut prüfen",
           "init": "⬅️ Zurück zum Menü"
         }
+      },
+      "geometry_editor": {
+        "title": "Visueller Geometrie-Editor",
+        "description": "Bearbeite Fenstergeometrie, Ausrichtung und toten Winkel dieser Abdeckung anhand einer Zeichnung statt als reine Zahlen.\n\n**[Geometrie-Editor öffnen]({editor_url})**\n\nDer Editor zeigt das Fenster von vorn und im Schnitt, den heutigen Sonnenverlauf durch das Fenster und eine Vorschau der Position, die diese Abdeckung zu jeder Tageszeit einnehmen würde. Er speichert dieselben Optionen wie die Schritte **Abdeckungsgeometrie**, **Sonnenverfolgung** und **Toter Winkel**.\n\nAdministratoren finden ihn auch in der Seitenleiste unter **Cover Geometry**."
       },
       "debug": {
         "title": "Debug & Diagnose",

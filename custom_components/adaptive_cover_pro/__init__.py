@@ -95,6 +95,7 @@ from .templates import (
     is_template_string,
     uses_acp_namespace,
 )
+from .geometry_editor import async_setup_geometry_editor
 from .migrations import (
     async_prune_legacy_entities,
     async_prune_legacy_sensor_entities,
@@ -408,6 +409,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AdaptiveConfigEntry) -> 
     """Set up Adaptive Cover Pro from a config entry."""
 
     await async_setup_services(hass)
+    await async_setup_geometry_editor(hass)
 
     # Virtual entry types (the Building Profile) hold only shared building-level
     # sensor IDs — they register no platforms and build no coordinator. Filter on

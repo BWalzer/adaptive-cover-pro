@@ -278,6 +278,7 @@ from .const import (
     GroupScene,
     TemplateCombineMode,
 )
+from .geometry_editor import EDITABLE_COVER_TYPES, editor_url
 from .companion_card import (
     CARD_ADD_URL,
     CARD_DOWNLOAD_URL,
@@ -5787,6 +5788,10 @@ class OptionsFlowHandler(OptionsFlow):
             "geometry",
             "sun_tracking",
         ]
+        # The visual geometry editor draws and previews vertical blinds only;
+        # offer its link right after the two steps it edits.
+        if self.sensor_type in EDITABLE_COVER_TYPES:
+            keys.append("geometry_editor")
         # Link this cover to a Building Profile (shared sensor IDs). Only shown
         # for real covers, and only when at least one profile exists to link to.
         if get_policy(self.sensor_type).controls_cover and _building_profile_entries(
@@ -5910,6 +5915,25 @@ class OptionsFlowHandler(OptionsFlow):
             step_id="troubleshoot",
             menu_options=menu_options,
             description_placeholders={"report": result.report},
+        )
+
+    async def async_step_geometry_editor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Link to the visual geometry editor panel for this cover.
+
+        A flow step can only render schema forms, so the editor is a separate
+        sidebar panel (see ``geometry_editor``); this screen explains it and
+        links straight to this entry. Submitting returns to the menu.
+        """
+        if user_input is not None:
+            return await self.async_step_init()
+        return self.async_show_form(
+            step_id="geometry_editor",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "editor_url": editor_url(self._config_entry.entry_id)
+            },
         )
 
     async def async_step_card(

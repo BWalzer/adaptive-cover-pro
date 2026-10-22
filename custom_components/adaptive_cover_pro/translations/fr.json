@@ -342,6 +342,7 @@
           "change_cover_type": "🔁 Modifier le type de store",
           "geometry": "📐 Géométrie du store",
           "sun_tracking": "☀️ Suivi du soleil",
+          "geometry_editor": "🖼️ Éditeur visuel de géométrie",
           "position": "📊 Paramètres de position",
           "behavior": "🎛️ Comportement & minuterie",
           "blind_spot": "🌳 Zone cachée",
@@ -916,6 +917,10 @@
           "troubleshoot": "🔁 Vérifier à nouveau",
           "init": "⬅️ Retour au menu"
         }
+      },
+      "geometry_editor": {
+        "title": "Éditeur visuel de géométrie",
+        "description": "Modifiez la géométrie de la fenêtre, l'orientation et l'angle mort de ce volet sur un dessin plutôt qu'avec des nombres seuls.\n\n**[Ouvrir l'éditeur de géométrie]({editor_url})**\n\nL'éditeur dessine la fenêtre de face et en coupe, montre la course du soleil du jour à travers elle et prévisualise la position que prendrait ce volet à toute heure. Il enregistre les mêmes options que les étapes **Géométrie du volet**, **Suivi du soleil** et **Angle mort**.\n\nLes administrateurs le trouvent aussi dans la barre latérale sous **Cover Geometry**."
       },
       "debug": {
         "title": "Débogage et diagnostics",

@@ -342,6 +342,7 @@
           "change_cover_type": "🔁 Change Cover Type",
           "geometry": "📐 Cover Geometry",
           "sun_tracking": "☀️ Sun Tracking",
+          "geometry_editor": "🖼️ Visual Geometry Editor",
           "position": "📊 Position Settings",
           "behavior": "🎛️ Behaviour & Timing",
           "blind_spot": "🌳 Blind Spot",
@@ -916,6 +917,10 @@
           "troubleshoot": "🔁 Re-check",
           "init": "⬅️ Back to menu"
         }
+      },
+      "geometry_editor": {
+        "title": "Visual Geometry Editor",
+        "description": "Edit this cover's window geometry, orientation and blind spot on a picture instead of as bare numbers.\n\n**[Open the geometry editor]({editor_url})**\n\nThe editor draws the window from the front and in section, shows today's sun path through it, and previews the position this cover would take at any time of day. It saves the same options as the **Cover Geometry**, **Sun Tracking** and **Blind Spot** steps.\n\nIt's also in the sidebar as **Cover Geometry** for administrators."
       },
       "debug": {
         "title": "Debug & Diagnostics",
